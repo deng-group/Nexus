@@ -68,7 +68,7 @@ def profile_phase_a(book_repo: Path, run_dir: Path) -> dict:
     extraction = timed_subprocess(
         [
             sys.executable,
-            "scripts/phase_a/extract_content.py",
+            "backend/scripts/phase_a/extract_content.py",
             "--repo",
             str(book_repo),
             "--output",
@@ -89,7 +89,7 @@ def profile_phase_a(book_repo: Path, run_dir: Path) -> dict:
     graph = timed_subprocess(
         [
             sys.executable,
-            "scripts/phase_a/build_knowledge_graph.py",
+            "backend/scripts/phase_a/build_knowledge_graph.py",
             "--chunks",
             str(chunks_path),
             "--output",

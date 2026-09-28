@@ -58,7 +58,11 @@ def course_source_url(file_path: str) -> str:
         normalized = ""
     elif normalized.lower().endswith(("/index", "/readme")):
         normalized = normalized.rsplit("/", 1)[0]
-    encoded_path = "/".join(quote(part) for part in normalized.split("/") if part)
+    # MyST publishes file and directory names as lowercase kebab-case slugs.
+    # For example, structures/crystal_structure.ipynb becomes
+    # /structures/crystal-structure/, rather than /structures/crystal_structure/.
+    slug_parts = [part.replace("_", "-").lower() for part in normalized.split("/") if part]
+    encoded_path = "/".join(quote(part) for part in slug_parts)
     return COURSE_SITE_BASE if not encoded_path else f"{COURSE_SITE_BASE}{encoded_path}/"
 
 

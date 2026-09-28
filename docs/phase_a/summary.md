@@ -114,14 +114,14 @@ From the project root:
 
 ```bash
 source ~/miniconda3/bin/activate && conda activate matsci && \
-python scripts/phase_a/extract_content.py \
+python backend/scripts/phase_a/extract_content.py \
   --repo ../MLE4217_5219_book \
   --output data/phase_a/course_chunks.jsonl
 ```
 
 ```bash
 source ~/miniconda3/bin/activate && conda activate matsci && \
-python scripts/phase_a/build_knowledge_graph.py \
+python backend/scripts/phase_a/build_knowledge_graph.py \
   --chunks data/phase_a/course_chunks.jsonl \
   --output data/phase_a/knowledge_graph.json
 ```

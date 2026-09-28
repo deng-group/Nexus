@@ -104,6 +104,9 @@ kbd { padding: 3px 6px; border: 1px solid var(--line); border-radius: 5px; color
 .eyebrow { margin: 0 0 2px; color: #718096; font-size: .63rem; font-weight: 800; letter-spacing: .18em; }
 .chat-header h1 { margin: 0; font-size: 1rem; }
 .chat-header-actions { display: flex; min-width: 0; align-items: center; gap: 10px; }
+.chat-clear { display: grid; place-items: center; min-width: 48px; height: 30px; padding: 0 9px; border: 1px solid var(--line); border-radius: 8px; color: #66758c; background: #ffffff; cursor: pointer; font-size: .68rem; font-weight: 750; line-height: 1; }
+.chat-clear:hover { color: #23314a; background: #f1f5f9; }
+.chat-clear:focus-visible { outline: 2px solid rgba(37,99,235,.28); outline-offset: 2px; }
 .chat-close { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 1px solid var(--line); border-radius: 8px; color: #66758c; background: #ffffff; cursor: pointer; font-size: 1.25rem; line-height: 1; }
 .chat-close:hover { color: #23314a; background: #f1f5f9; }
 .grounded-badge { display: flex; align-items: center; gap: 6px; color: #66758c; font-size: .68rem; white-space: nowrap; }
@@ -194,7 +197,7 @@ kbd { padding: 3px 6px; border: 1px solid var(--line); border-radius: 5px; color
   .graph-hint { display: none; }
   .legend { left: 12px; bottom: 10px; gap: 6px; padding: 5px; }
   .node-card { left: 12px; bottom: 12px; width: calc(100% - 24px); padding: 16px; }
-  .chat-header { padding: 0 16px; }.grounded-badge { font-size: .62rem; }
+  .chat-header { padding: 0 16px; }.grounded-badge { display: none; }
   .messages { padding-inline: 16px; }.suggestions { padding-inline: 16px; }.composer { margin-inline: 12px; }
 }
 

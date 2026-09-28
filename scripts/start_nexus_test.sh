@@ -4,7 +4,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-ENV_FILE="${SCRIPT_DIR}/api_env.sh"
 PORT="${PORT:-5057}"
 NO_BROWSER=false
 
@@ -15,13 +14,19 @@ elif [[ -n "${1:-}" ]]; then
   exit 2
 fi
 
-if [[ ! -f "${ENV_FILE}" ]]; then
-  echo "Missing scripts/api_env.sh. Copy scripts/api_env.example.sh and add the local API key first."
+if [[ -z "${ANTHROPIC_BASE_URL:-}" || -z "${ANTHROPIC_MODEL:-}" ]]; then
+  echo "API environment is not loaded."
+  echo "Run: source scripts/api_env.sh"
+  echo "Then run this launcher again."
   exit 1
 fi
 
-# shellcheck source=/dev/null
-source "${ENV_FILE}" >/dev/null
+if [[ -z "${ANTHROPIC_AUTH_TOKEN:-}" && -z "${ANTHROPIC_API_KEY:-}" ]]; then
+  echo "No Anthropic API token is loaded."
+  echo "Run: source scripts/api_env.sh"
+  echo "Then run this launcher again."
+  exit 1
+fi
 
 PYTHON_CANDIDATES=()
 if [[ -n "${MLE_AGENT_PYTHON:-}" ]]; then
@@ -50,7 +55,7 @@ if [[ -z "${PYTHON_BIN}" ]]; then
 fi
 
 cd "${REPO_ROOT}"
-"${PYTHON_BIN}" scripts/check_nexus_api.py
+"${PYTHON_BIN}" backend/scripts/check_api.py
 
 NEXUS_URL="http://127.0.0.1:${PORT}/?theme=light"
 HEALTH_URL="http://127.0.0.1:${PORT}/api/health"

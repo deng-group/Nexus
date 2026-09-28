@@ -16,6 +16,7 @@ const elements = {
   nodeTitle: document.querySelector("#node-title"),
   chatPanel: document.querySelector("#chat-panel"),
   openChat: document.querySelector("#open-chat"),
+  clearChat: document.querySelector("#clear-chat"),
   closeChat: document.querySelector("#close-chat"),
   contextBar: document.querySelector("#context-bar"),
   contextChip: document.querySelector("#context-chip"),
@@ -50,6 +51,7 @@ const state = {
   pointer: null,
   mode: "overview",
   activeExplanationController: null,
+  activeQuestionController: null,
   chatAutoFollow: true,
   chatOpen: false,
 };
@@ -727,6 +729,35 @@ function addAssistantMessage(options = {}) {
   return { article, body, content };
 }
 
+function showWelcomeMessage() {
+  const article = document.createElement("article"); article.className = "message assistant";
+  const avatar = document.createElement("div"); avatar.className = "assistant-avatar"; avatar.setAttribute("aria-hidden", "true"); avatar.textContent = "N";
+  const content = document.createElement("div"); const message = document.createElement("p"); const note = document.createElement("small");
+  message.textContent = "Choose a node, then select Explain—or ask a question about the course.";
+  note.textContent = "Answers use only the provided course materials.";
+  content.append(message, note); article.append(avatar, content); elements.messages.replaceChildren(article);
+}
+
+function clearConversation() {
+  abortAutomaticExplanation();
+  if (state.activeQuestionController) {
+    state.activeQuestionController.abort();
+    state.activeQuestionController = null;
+  }
+  sessionStorage.removeItem(MEMORY_KEY);
+  elements.question.value = "";
+  elements.send.disabled = false;
+  elements.suggestions.hidden = false;
+  elements.sourceToggle.setAttribute("aria-expanded", "false");
+  elements.sourceList.hidden = true;
+  setSources([]);
+  updateContext();
+  resizeQuestion();
+  state.chatAutoFollow = true;
+  showWelcomeMessage();
+  elements.question.focus();
+}
+
 function scrollMessagesToBottom(force = false) {
   if (!force && !state.chatAutoFollow) return;
   elements.messages.scrollTop = elements.messages.scrollHeight;
@@ -803,15 +834,27 @@ async function explainSelectedNode(node) {
 async function submitQuestion(query) {
   const text = query.trim(); if (!text || elements.send.disabled) return;
   abortAutomaticExplanation();
+  const controller = new AbortController();
+  state.activeQuestionController = controller;
   elements.question.value = ""; resizeQuestion(); elements.send.disabled = true; elements.suggestions.hidden = true;
   addUserMessage(text); const assistant = addAssistantMessage();
   try {
-    const answer = await streamQuestion(text, assistant);
+    const answer = await streamQuestion(text, assistant, { signal: controller.signal });
+    if (state.activeQuestionController !== controller) return;
     const memory = readMemory(); memory.push({ role: "user", content: text }, { role: "assistant", content: answer }); writeMemory(memory);
   } catch (error) {
+    if (error.name === "AbortError") {
+      assistant.article.remove();
+      return;
+    }
     assistant.article.classList.add("error"); assistant.body.textContent = error.message;
   } finally {
-    elements.send.disabled = false; elements.question.focus(); scrollMessagesToBottom();
+    if (state.activeQuestionController === controller) {
+      state.activeQuestionController = null;
+      elements.send.disabled = false;
+      elements.question.focus();
+    }
+    scrollMessagesToBottom();
   }
 }
 
@@ -859,6 +902,7 @@ document.querySelector("#ask-node").addEventListener("click", () => {
   setChatOpen(true);
 });
 elements.openChat.addEventListener("click", () => setChatOpen(true));
+elements.clearChat.addEventListener("click", clearConversation);
 elements.closeChat.addEventListener("click", () => setChatOpen(false));
 elements.contextChip.addEventListener("click", () => setViewMode(state.mode));
 elements.sourceToggle.addEventListener("click", () => {

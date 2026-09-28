@@ -9,12 +9,14 @@ Jupyter Book course website.
 From the repository root, run:
 
 ```bash
+source scripts/api_env.sh
 ./scripts/start_nexus_test.sh
 ```
 
-The launcher performs the complete local preflight:
+The API environment is loaded explicitly so changing the local key or model is
+independent from starting Nexus. The launcher then performs the local preflight:
 
-1. loads the ignored local configuration from `scripts/api_env.sh`;
+1. confirms that the API environment is already loaded;
 2. finds a Python environment with the RAG dependencies;
 3. makes a small real request to verify the API key, endpoint, and model;
 4. starts Nexus at `http://127.0.0.1:5057/`; and
@@ -24,6 +26,7 @@ Keep the terminal open while testing. Press `Ctrl+C` to stop the local server.
 To start the server without opening a browser, use:
 
 ```bash
+source scripts/api_env.sh
 ./scripts/start_nexus_test.sh --no-browser
 ```
 
@@ -33,14 +36,15 @@ If `scripts/api_env.sh` does not exist, create it once:
 cp scripts/api_env.example.sh scripts/api_env.sh
 ```
 
-Then edit only the local `scripts/api_env.sh` and add the API token. The file is
-ignored by Git and must never be committed.
+Then edit only the local `scripts/api_env.sh` and add the API token. Source it
+again whenever the key, endpoint, or model changes. The file is ignored by Git
+and must never be committed.
 
 To check the API without starting the website:
 
 ```bash
 source scripts/api_env.sh
-python3 scripts/check_nexus_api.py
+python3 backend/scripts/check_api.py
 ```
 
 A successful check prints the provider and model but never prints the token.
@@ -79,5 +83,6 @@ same node IDs, edges, and ordering.
 - `nexus/data/course_graph.json` — generated graph data.
 - `nexus/PROJECT_PLAN.md` — product plan, status, and TODO items.
 - `scripts/api_env.sh` — ignored local API configuration.
-- `scripts/check_nexus_api.py` — safe live API preflight.
-- `scripts/start_nexus_test.sh` — one-command local launcher.
+- `scripts/start_nexus_test.sh` — Nexus launcher that uses the API environment
+  already loaded in the current terminal.
+- `backend/scripts/check_api.py` — safe live API preflight used by the launcher.
