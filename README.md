@@ -101,13 +101,25 @@ evidence is insufficient, ambiguous, time-dependent, or out of scope.
 
 ## Installation
 
-Nexus requires Python 3.10 or newer.
+Nexus requires Python 3.10 or newer. Dependencies are declared in `pyproject.toml` and pinned in `uv.lock`;
+the recommended installer is [uv](https://docs.astral.sh/uv/).
 
 ```bash
 git clone https://github.com/deng-group/Nexus.git
 cd Nexus
+uv sync --all-extras          # creates .venv with the locked versions
+source .venv/bin/activate     # or prefix commands with `uv run`
+```
+
+Optional extras: `ingest` (notebook extraction with `nbformat`), `openai` (OpenAI provider), and `deploy` (`gunicorn`).
+Use `uv sync` without `--all-extras` for the core app only. After changing dependencies, run `uv lock` and commit
+both `pyproject.toml` and `uv.lock`.
+
+Plain pip also works; it installs the dependencies from `pyproject.toml` (without the lock-file pins):
+
+```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+pip install -e ".[ingest,openai]"
 ```
 
 The first retrieval run downloads the sentence-transformer embedding model used for semantic search.

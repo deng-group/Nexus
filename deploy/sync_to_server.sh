@@ -23,6 +23,7 @@ echo "Syncing backend to $REMOTE:/srv/mle-course-helper/backend/"
 rsync -az --delete \
   --exclude .git \
   --exclude .env \
+  --exclude .venv \
   --exclude __pycache__ \
   --exclude '*.pyc' \
   "$BACKEND_REPO/" "$REMOTE:/srv/mle-course-helper/backend/"
