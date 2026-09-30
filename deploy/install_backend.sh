@@ -3,13 +3,16 @@ set -euo pipefail
 
 APP_DIR="${APP_DIR:-/srv/mle-course-helper/backend}"
 VENV_DIR="${VENV_DIR:-$APP_DIR/.venv}"
-PYTHON_BIN="${PYTHON_BIN:-python3}"
 
 cd "$APP_DIR"
 
-"$PYTHON_BIN" -m venv "$VENV_DIR"
-"$VENV_DIR/bin/python" -m pip install --upgrade pip wheel
-"$VENV_DIR/bin/python" -m pip install -r requirements.txt
+if ! command -v uv >/dev/null 2>&1; then
+  echo "uv is required. Install it with: curl -LsSf https://astral.sh/uv/install.sh | sh"
+  exit 1
+fi
+
+# Install the exact versions pinned in uv.lock, plus gunicorn for the systemd service.
+UV_PROJECT_ENVIRONMENT="$VENV_DIR" uv sync --frozen --extra deploy
 
 "$VENV_DIR/bin/python" backend/scripts/query.py "What is convex hull?"
 

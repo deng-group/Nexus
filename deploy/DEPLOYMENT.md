@@ -18,7 +18,8 @@ Ubuntu example:
 
 ```bash
 sudo apt update
-sudo apt install -y git rsync nginx python3 python3-venv python3-pip
+sudo apt install -y git rsync nginx python3
+curl -LsSf https://astral.sh/uv/install.sh | sh   # uv installs the locked Python environment
 ```
 
 Create directories:
@@ -35,7 +36,7 @@ On your laptop, upload the backend repo:
 
 ```bash
 rsync -az --delete \
-  --exclude .git --exclude .env --exclude __pycache__ \
+  --exclude .git --exclude .env --exclude .venv --exclude __pycache__ \
   /path/to/mle4217_5219_AIdesk/ \
   USER@SERVER:/srv/mle-course-helper/backend/
 ```

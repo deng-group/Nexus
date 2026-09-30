@@ -1,0 +1,36 @@
+[project]
+name = "nexus"
+version = "0.1.0"
+description = "Interactive course knowledge graph and course-grounded AI learning agent"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Zeyu Deng" }]
+dependencies = [
+    "flask>=3.0,<4",
+    "numpy>=1.26,<3",
+    "scikit-learn>=1.4,<2",
+    "sentence-transformers>=3,<6",
+]
+
+[project.optional-dependencies]
+# Phase A: extract and chunk Jupyter notebooks from the course book.
+ingest = ["nbformat>=5.9,<6"]
+# OpenAI Responses provider (Anthropic and Gemini use the standard library).
+openai = ["openai>=1.50,<3"]
+# Production WSGI server used by deploy/mle-course-helper.service.
+deploy = ["gunicorn>=22,<24"]
+
+[project.urls]
+Homepage = "https://github.com/deng-group/Nexus"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+# Code is run from the repository root, so `pip install .` only installs dependencies.
+packages = []
+
+[tool.uv]
+# Nexus is run as scripts from the repository root, not installed as a package.
+package = false
