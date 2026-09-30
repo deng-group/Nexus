@@ -14,25 +14,15 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from backend.app.answer_generator import AnswerGenerator, load_env_file, provider_from_name
+from backend.app.answer_generator import (
+    AnswerGenerator,
+    default_model_name,
+    default_provider_name,
+    load_env_file,
+    provider_from_name,
+)
 from backend.app.prompt_builder import PromptBuilder
 from backend.app.query_pipeline import QueryPipeline
-
-
-def default_provider() -> str:
-    if os.environ.get("ANTHROPIC_AUTH_TOKEN") or os.environ.get("ANTHROPIC_API_KEY"):
-        return "anthropic"
-    if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
-        return "gemini"
-    return "dry_run"
-
-
-def default_model(provider: str) -> str:
-    if provider == "anthropic":
-        return os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
-    if provider == "gemini":
-        return os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
-    return ""
 
 
 def public_sources(sources: list[dict]) -> list[dict]:
@@ -66,11 +56,11 @@ def create_app() -> Flask:
 
     @app.get("/")
     def index():
-        provider = default_provider()
+        provider = default_provider_name()
         return render_template(
             "index.html",
             default_provider=provider,
-            default_model=default_model(provider),
+            default_model=default_model_name(provider),
         )
 
     @app.get("/api/health")
@@ -78,8 +68,9 @@ def create_app() -> Flask:
         return jsonify(
             {
                 "ok": True,
-                "default_provider": default_provider(),
+                "default_provider": default_provider_name(),
                 "anthropic_configured": bool(os.environ.get("ANTHROPIC_AUTH_TOKEN") or os.environ.get("ANTHROPIC_API_KEY")),
+                "openai_configured": bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENAI_BASE_URL")),
                 "gemini_configured": bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")),
             }
         )
@@ -91,8 +82,8 @@ def create_app() -> Flask:
         if not query:
             return jsonify({"ok": False, "error": "Query is required."}), 400
 
-        provider = payload.get("provider") or default_provider()
-        model = payload.get("model") or default_model(provider) or None
+        provider = payload.get("provider") or default_provider_name()
+        model = payload.get("model") or default_model_name(provider) or None
         memory = payload.get("short_memory") or []
 
         try:
@@ -138,8 +129,8 @@ def create_app() -> Flask:
         if not query:
             return jsonify({"ok": False, "error": "Query is required."}), 400
 
-        provider = payload.get("provider") or default_provider()
-        model = payload.get("model") or default_model(provider) or None
+        provider = payload.get("provider") or default_provider_name()
+        model = payload.get("model") or default_model_name(provider) or None
         memory = payload.get("short_memory") or []
 
         def events():

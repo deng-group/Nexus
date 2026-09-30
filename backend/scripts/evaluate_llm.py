@@ -17,7 +17,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from backend.app.answer_generator import AnswerGenerator, provider_from_name
+from backend.app.answer_generator import PROVIDER_NAMES, AnswerGenerator, provider_from_name
 from backend.app.prompt_builder import PromptBuilder
 from backend.app.query_pipeline import QueryPipeline
 
@@ -100,7 +100,7 @@ def main() -> None:
     parser.add_argument("--cases", type=Path, default=Path("test/llm_smoke_cases.json"))
     parser.add_argument("--output", type=Path, default=Path("test/llm_smoke_report.md"))
     parser.add_argument("--history-dir", type=Path, default=Path("test/llm_smoke_reports"))
-    parser.add_argument("--provider", choices=["dry_run", "openai", "gemini", "anthropic"], default="dry_run")
+    parser.add_argument("--provider", choices=PROVIDER_NAMES, default="dry_run")
     parser.add_argument("--model", default=None)
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--max-evidence", type=int, default=None)

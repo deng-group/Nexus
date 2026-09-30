@@ -15,8 +15,6 @@ dependencies = [
 [project.optional-dependencies]
 # Phase A: extract and chunk Jupyter notebooks from the course book.
 ingest = ["nbformat>=5.9,<6"]
-# OpenAI Responses provider (Anthropic and Gemini use the standard library).
-openai = ["openai>=1.50,<3"]
 # Production WSGI server used by deploy/mle-course-helper.service.
 deploy = ["gunicorn>=22,<24"]
 

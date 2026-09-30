@@ -17,7 +17,13 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from backend.app.answerability import AnswerabilityGate
-from backend.app.answer_generator import load_env_file, provider_from_name
+from backend.app.answer_generator import (
+    PROVIDER_NAMES,
+    default_model_name,
+    default_provider_name,
+    load_env_file,
+    provider_from_name,
+)
 from backend.app.prompt_builder import PromptBuilder
 from backend.app.query_pipeline import NEXT_ACTIONS, QueryPipeline
 from backend.app.retriever import HybridRetriever
@@ -181,30 +187,6 @@ def profile_phase_b(chunks_path: Path, cache_dir: Path, questions: list[str], to
         "max_query_s": max(query_times) if query_times else 0.0,
         "pipeline_results": pipeline_results,
     }
-
-
-def default_provider_name() -> str:
-    import os
-
-    if os.environ.get("ANTHROPIC_AUTH_TOKEN") or os.environ.get("ANTHROPIC_API_KEY"):
-        return "anthropic"
-    if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
-        return "gemini"
-    if os.environ.get("OPENAI_API_KEY"):
-        return "openai"
-    return "dry_run"
-
-
-def default_model_name(provider: str) -> str | None:
-    import os
-
-    if provider == "anthropic":
-        return os.environ.get("ANTHROPIC_MODEL")
-    if provider == "gemini":
-        return os.environ.get("GEMINI_MODEL")
-    if provider == "openai":
-        return os.environ.get("OPENAI_MODEL")
-    return None
 
 
 def profile_phase_c(pipeline_results: list[dict], provider_name: str, model: str | None) -> dict:
@@ -462,7 +444,7 @@ def main() -> None:
     parser.add_argument("--run-root", type=Path, default=Path("test/profile_runs"))
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--include-phase-a", action="store_true", help="Rerun Phase A and include its detailed timing.")
-    parser.add_argument("--phase-c-provider", choices=["dry_run", "openai", "gemini", "anthropic"], default=None)
+    parser.add_argument("--phase-c-provider", choices=PROVIDER_NAMES, default=None)
     parser.add_argument("--phase-c-model", default=None)
     args = parser.parse_args()
 

@@ -66,10 +66,17 @@ terms such as "this", "that", "it", or "they", retrieval also prepends up to the
 last 4 memory items, truncated to 400 characters each, to make the search query
 less ambiguous.
 
-The LLM provider is configured through `.env`. The current local setup uses an
-Anthropic-compatible API through `ANTHROPIC_BASE_URL`,
-`ANTHROPIC_AUTH_TOKEN`, and `ANTHROPIC_MODEL`. The `.env` file is ignored by git
-and should not be committed.
+The LLM provider is configured through environment variables, loaded from
+`scripts/api_env.sh` or `.env` (both ignored by git). Three providers are
+supported: `anthropic` (Anthropic Messages API: `ANTHROPIC_BASE_URL`,
+`ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`), `openai` (any OpenAI-compatible Chat
+Completions API: `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_MODEL`), and
+`gemini` (`GEMINI_API_KEY`, `GEMINI_MODEL`). All three stream answers. Set
+`LLM_PROVIDER` to choose one explicitly; otherwise the first configured provider
+in that order is used, falling back to `dry_run`. `LLM_TEMPERATURE` sets the
+answer temperature for every provider (default `0.2`); `none` omits the field for
+models that reject it. The current local setup uses an
+Anthropic-compatible relay.
 
 ## Repository Relationship
 

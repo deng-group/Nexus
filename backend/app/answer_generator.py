@@ -29,8 +29,10 @@ from backend.app.query_pipeline import QueryPipeline
 
 
 DEFAULT_OPENAI_MODEL = "gpt-4.1-mini"
+DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6"
+DEFAULT_TEMPERATURE = 0.2
 
 
 def load_env_file(path: Path) -> None:
@@ -46,6 +48,47 @@ def load_env_file(path: Path) -> None:
         value = value.strip().strip('"').strip("'")
         if key and key not in os.environ:
             os.environ[key] = value
+
+
+def temperature_setting() -> dict:
+    """Return the request's temperature field, read from `LLM_TEMPERATURE`.
+
+    Defaults to 0.2 for focused, evidence-based answers. Set `LLM_TEMPERATURE=none`
+    to leave the field out, for models that only accept their default temperature
+    (for example OpenAI reasoning models).
+    """
+    raw = os.environ.get("LLM_TEMPERATURE", "").strip()
+    if not raw:
+        return {"temperature": DEFAULT_TEMPERATURE}
+    if raw.lower() == "none":
+        return {}
+    try:
+        return {"temperature": float(raw)}
+    except ValueError:
+        raise RuntimeError(f"LLM_TEMPERATURE must be a number or `none`, not `{raw}`.") from None
+
+
+def _open(req: request.Request, label: str, timeout: int):
+    """Open an HTTP request and turn transport failures into readable errors."""
+    try:
+        return request.urlopen(req, timeout=timeout)
+    except error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")[:500]
+        raise RuntimeError(f"{label} API error {exc.code}: {body}") from exc
+    except error.URLError as exc:
+        raise RuntimeError(f"{label} API unreachable: {exc.reason}") from exc
+
+
+def _iter_sse_data(response) -> Iterator[dict]:
+    """Yield the JSON payloads of the `data:` lines in a server-sent event stream."""
+    for raw_line in response:
+        line = raw_line.decode("utf-8", errors="replace").strip()
+        if not line.startswith("data:"):
+            continue
+        data = line[5:].strip()
+        if not data or data == "[DONE]":
+            continue
+        yield json.loads(data)
 
 
 class LLMProvider(Protocol):
@@ -107,47 +150,81 @@ class DryRunProvider:
 
 
 @dataclass
-class OpenAIResponsesProvider:
-    """Optional OpenAI Responses API provider.
+class OpenAICompatibleProvider:
+    """OpenAI Chat Completions provider for OpenAI and any compatible endpoint.
 
-    Requires the `openai` package and `OPENAI_API_KEY`. The model is read from
-    `OPENAI_MODEL` or the constructor, so the project can choose a current model
-    without changing code.
+    Works with any server that implements `POST {base_url}/chat/completions`,
+    such as OpenAI, DeepSeek, OpenRouter, vLLM, Ollama, or LM Studio. Configure
+    it with `OPENAI_BASE_URL`, `OPENAI_API_KEY`, and `OPENAI_MODEL`. The key is
+    optional for custom base URLs, since local servers often need none.
     """
 
     model: str | None = None
-    name: str = "openai_responses"
+    name: str = "openai"
 
-    def generate(self, prompt_package: dict) -> dict:
-        try:
-            from openai import OpenAI
-        except ImportError as exc:
-            raise RuntimeError("OpenAI provider requires the `openai` Python package.") from exc
+    def resolved_model(self) -> str:
+        return self.model or os.environ.get("OPENAI_MODEL") or DEFAULT_OPENAI_MODEL
 
-        model = self.model or os.environ.get("OPENAI_MODEL") or DEFAULT_OPENAI_MODEL
-        if not os.environ.get("OPENAI_API_KEY"):
+    def _request(self, prompt_package: dict, stream: bool) -> request.Request:
+        base_url = os.environ.get("OPENAI_BASE_URL", DEFAULT_OPENAI_BASE_URL).rstrip("/")
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if not api_key and base_url == DEFAULT_OPENAI_BASE_URL:
             raise RuntimeError("Set OPENAI_API_KEY before using the OpenAI provider.")
-        if not model:
-            raise RuntimeError("Set OPENAI_MODEL or pass a model before using the OpenAI provider.")
 
         messages = prompt_package["messages"]
-        system_message = messages[0]["content"]
-        user_message = messages[1]["content"]
-
-        client = OpenAI()
-        response = client.responses.create(
-            model=model,
-            instructions=system_message,
-            input=user_message,
+        payload = {
+            "model": self.resolved_model(),
+            **temperature_setting(),
+            "messages": [
+                {"role": "system", "content": messages[0]["content"]},
+                {"role": "user", "content": messages[1]["content"]},
+            ],
+        }
+        if stream:
+            payload["stream"] = True
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        return request.Request(
+            f"{base_url}/chat/completions",
+            data=json.dumps(payload).encode("utf-8"),
+            headers=headers,
+            method="POST",
         )
-        answer = getattr(response, "output_text", None) or str(response)
+
+    def generate(self, prompt_package: dict) -> dict:
+        with _open(self._request(prompt_package, stream=False), "OpenAI-compatible", timeout=90) as response:
+            raw = json.loads(response.read().decode("utf-8"))
         return {
             "provider": self.name,
-            "model": model,
-            "answer": answer,
+            "model": self.resolved_model(),
+            "answer": self._extract_text(raw),
             "citations": [item["chunk_id"] for item in prompt_package.get("evidence", [])],
-            "raw_response": response.model_dump() if hasattr(response, "model_dump") else None,
+            "raw_response": raw,
         }
+
+    def stream(self, prompt_package: dict) -> Iterator[str]:
+        """Yield text deltas from an OpenAI-compatible SSE response."""
+        with _open(self._request(prompt_package, stream=True), "OpenAI-compatible", timeout=120) as response:
+            for event_payload in _iter_sse_data(response):
+                if event_payload.get("error"):
+                    message = event_payload["error"].get("message", "Unknown streaming error")
+                    raise RuntimeError(f"OpenAI-compatible API error: {message}")
+                for choice in event_payload.get("choices", []):
+                    text = (choice.get("delta") or {}).get("content")
+                    if text:
+                        yield text
+
+    @staticmethod
+    def _extract_text(raw: dict) -> str:
+        parts = []
+        for choice in raw.get("choices", []):
+            text = (choice.get("message") or {}).get("content")
+            if text:
+                parts.append(text)
+        if parts:
+            return "\n".join(parts).strip()
+        return json.dumps(raw, ensure_ascii=False)
 
 
 @dataclass
@@ -157,24 +234,23 @@ class GeminiProvider:
     model: str | None = None
     name: str = "gemini"
 
-    def generate(self, prompt_package: dict) -> dict:
-        model = self.model or os.environ.get("GEMINI_MODEL") or DEFAULT_GEMINI_MODEL
+    def resolved_model(self) -> str:
+        return self.model or os.environ.get("GEMINI_MODEL") or DEFAULT_GEMINI_MODEL
+
+    def _request(self, prompt_package: dict, stream: bool) -> request.Request:
         api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
         if not api_key:
             raise RuntimeError("Set GEMINI_API_KEY or GOOGLE_API_KEY before using the Gemini provider.")
 
         messages = prompt_package["messages"]
-        system_message = messages[0]["content"]
-        user_message = messages[1]["content"]
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+        method = "streamGenerateContent?alt=sse" if stream else "generateContent"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.resolved_model()}:{method}"
         payload = {
-            "systemInstruction": {"parts": [{"text": system_message}]},
-            "contents": [{"role": "user", "parts": [{"text": user_message}]}],
-            "generationConfig": {
-                "temperature": 0.2,
-            },
+            "systemInstruction": {"parts": [{"text": messages[0]["content"]}]},
+            "contents": [{"role": "user", "parts": [{"text": messages[1]["content"]}]}],
+            "generationConfig": temperature_setting(),
         }
-        req = request.Request(
+        return request.Request(
             url,
             data=json.dumps(payload).encode("utf-8"),
             headers={
@@ -183,21 +259,29 @@ class GeminiProvider:
             },
             method="POST",
         )
-        try:
-            with request.urlopen(req, timeout=60) as response:
-                raw = json.loads(response.read().decode("utf-8"))
-        except error.HTTPError as exc:
-            body = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"Gemini API error {exc.code}: {body}") from exc
 
-        answer = self._extract_text(raw)
+    def generate(self, prompt_package: dict) -> dict:
+        with _open(self._request(prompt_package, stream=False), "Gemini", timeout=60) as response:
+            raw = json.loads(response.read().decode("utf-8"))
         return {
             "provider": self.name,
-            "model": model,
-            "answer": answer,
+            "model": self.resolved_model(),
+            "answer": self._extract_text(raw),
             "citations": [item["chunk_id"] for item in prompt_package.get("evidence", [])],
             "raw_response": raw,
         }
+
+    def stream(self, prompt_package: dict) -> Iterator[str]:
+        """Yield text deltas from a Gemini SSE response."""
+        with _open(self._request(prompt_package, stream=True), "Gemini", timeout=120) as response:
+            for event_payload in _iter_sse_data(response):
+                if event_payload.get("error"):
+                    message = event_payload["error"].get("message", "Unknown streaming error")
+                    raise RuntimeError(f"Gemini API error: {message}")
+                for candidate in event_payload.get("candidates", []):
+                    for part in candidate.get("content", {}).get("parts", []):
+                        if part.get("text"):
+                            yield part["text"]
 
     @staticmethod
     def _extract_text(raw: dict) -> str:
@@ -233,7 +317,7 @@ class AnthropicProvider:
         payload = {
             "model": model,
             "max_tokens": 2048,
-            "temperature": 0.2,
+            **temperature_setting(),
             "system": messages[0]["content"],
             "messages": [
                 {
@@ -295,7 +379,7 @@ class AnthropicProvider:
         payload = {
             "model": self.resolved_model(),
             "max_tokens": 2048,
-            "temperature": 0.2,
+            **temperature_setting(),
             "stream": True,
             "system": messages[0]["content"],
             "messages": [{"role": "user", "content": messages[1]["content"]}],
@@ -494,11 +578,14 @@ class AnswerGenerator:
             return
 
         stream = getattr(self.provider, "stream", None)
-        if not callable(stream):
-            raise RuntimeError(f"Provider `{self.provider.name}` does not support streaming in the web widget.")
+        if callable(stream):
+            deltas = stream(prompt_package)
+        else:
+            # Providers without streaming still work; the answer arrives as one delta.
+            deltas = iter([self.provider.generate(prompt_package)["answer"]])
 
         chunks = []
-        for delta in stream(prompt_package):
+        for delta in deltas:
             if not delta:
                 continue
             chunks.append(delta)
@@ -574,11 +661,14 @@ class AnswerGenerator:
         return cleaned
 
 
+PROVIDER_NAMES = ("dry_run", "anthropic", "openai", "gemini")
+
+
 def provider_from_name(name: str, model: str | None = None) -> LLMProvider:
     if name == "dry_run":
         return DryRunProvider()
     if name == "openai":
-        return OpenAIResponsesProvider(model=model)
+        return OpenAICompatibleProvider(model=model)
     if name == "gemini":
         return GeminiProvider(model=model)
     if name == "anthropic":
@@ -586,10 +676,31 @@ def provider_from_name(name: str, model: str | None = None) -> LLMProvider:
     raise ValueError(f"Unknown provider: {name}")
 
 
+def default_provider_name() -> str:
+    """Pick the provider from `LLM_PROVIDER`, else from whichever credentials are set."""
+    explicit = os.environ.get("LLM_PROVIDER", "").strip().lower()
+    if explicit:
+        if explicit not in PROVIDER_NAMES:
+            raise ValueError(f"Unknown LLM_PROVIDER `{explicit}`; expected one of {', '.join(PROVIDER_NAMES)}.")
+        return explicit
+    if os.environ.get("ANTHROPIC_AUTH_TOKEN") or os.environ.get("ANTHROPIC_API_KEY"):
+        return "anthropic"
+    if os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENAI_BASE_URL"):
+        return "openai"
+    if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
+        return "gemini"
+    return "dry_run"
+
+
+def default_model_name(provider: str) -> str | None:
+    resolve_model = getattr(provider_from_name(provider), "resolved_model", None)
+    return resolve_model() if callable(resolve_model) else None
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate an answer package for one query.")
     parser.add_argument("query")
-    parser.add_argument("--provider", choices=["dry_run", "openai", "gemini", "anthropic"], default="dry_run")
+    parser.add_argument("--provider", choices=PROVIDER_NAMES, default="dry_run")
     parser.add_argument("--model", default=None)
     parser.add_argument("--env-file", type=Path, default=Path(".env"))
     parser.add_argument("--top-k", type=int, default=5)
