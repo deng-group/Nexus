@@ -206,4 +206,3 @@ If you use Nexus or adapt the workflow for your own course, please cite this rep
 }
 ```
 
-The README structure is inspired by [`doped`](https://github.com/SMTG-Bham/doped).
