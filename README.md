@@ -69,22 +69,21 @@ evidence is insufficient, ambiguous, time-dependent, or out of scope.
 
 ## Key features
 
-- **Non-linear exploration.** The course is presented as a graph of chapters and concepts with evidence-backed links, so students can
-  navigate by curiosity and see which concepts recur across the curriculum.
-- **Course-grounded answers.** Every answer is generated from retrieved course chunks only. Answers begin by pointing to the relevant
-  course sources, and sources are clickable links to the course website.
-- **Explicit answer boundaries.** The answerability gate classifies each question as `answerable`, `needs_time_context`,
-  `needs_clarification`, `weak_evidence`, or `out_of_scope` before any model call, so the agent refuses or asks for clarification
-  instead of guessing. Instructors control the policy through the prompt and gate thresholds.
-- **Contextual explanation.** The selected graph node is passed as retrieval context, so "Explain" and follow-up questions stay within
-  the student's current learning context.
-- **Lightweight and private.** Short-term conversation memory lives only in the browser session. API keys and provider configuration stay
-  on the server, and nothing is stored across students.
-- **Provider-agnostic LLM.** Switch between Anthropic-compatible, OpenAI, and Gemini endpoints through environment variables.
-  A `dry_run` provider exercises the whole pipeline without calling a model.
-- **Two front-ends from one backend.** The standalone Nexus graph app (`nexus/`) and an embeddable chat widget for the course website
-  (`web_app/`) share the same `/api/answer` and `/api/answer/stream` routes.
-- **Transferable.** Extraction, graph building, retrieval, and evaluation are driven by paths and a taxonomy file, not by course-specific code.
+**For students**
+
+- **Exploration and explanation.** Navigate the course by curiosity, see how concepts connect across chapters, and ask for an explanation
+  of any node within the current learning context.
+- **Self-testing with visible boundaries.** Example questions, follow-up dialogue, and linked course sources support independent study,
+  and the agent states explicitly when the course evidence is insufficient or the question is out of scope.
+
+**For instructors**
+
+- **Transferable framework.** Build the graph and the agent from your own teaching materials using the same extraction, retrieval, and
+  evidence pipeline; the course-specific inputs are the content and a small concept taxonomy.
+- **Lightweight and private.** Evidence-gated answers with minimal context sharing protect course data, and any LLM API provider works,
+  so there is no costly local deployment or fine-tuning.
+- **Control over answer policy.** The answerability gate, prompt, and evaluation sets let you decide what the agent may answer and verify it
+  before students use it.
 
 ## Repository layout
 
