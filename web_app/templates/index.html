@@ -39,13 +39,14 @@
             Provider
             <select id="provider">
               <option value="anthropic" {% if default_provider == "anthropic" %}selected{% endif %}>Anthropic</option>
+              <option value="openai" {% if default_provider == "openai" %}selected{% endif %}>OpenAI-compatible</option>
               <option value="gemini" {% if default_provider == "gemini" %}selected{% endif %}>Gemini</option>
               <option value="dry_run" {% if default_provider == "dry_run" %}selected{% endif %}>Dry run</option>
             </select>
           </label>
           <label>
             Model
-            <input id="model" value="{{ default_model }}" />
+            <input id="model" value="{{ default_model or '' }}" />
           </label>
         </div>
       </details>

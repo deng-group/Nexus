@@ -14,20 +14,6 @@ elif [[ -n "${1:-}" ]]; then
   exit 2
 fi
 
-if [[ -z "${ANTHROPIC_BASE_URL:-}" || -z "${ANTHROPIC_MODEL:-}" ]]; then
-  echo "API environment is not loaded."
-  echo "Run: source scripts/api_env.sh"
-  echo "Then run this launcher again."
-  exit 1
-fi
-
-if [[ -z "${ANTHROPIC_AUTH_TOKEN:-}" && -z "${ANTHROPIC_API_KEY:-}" ]]; then
-  echo "No Anthropic API token is loaded."
-  echo "Run: source scripts/api_env.sh"
-  echo "Then run this launcher again."
-  exit 1
-fi
-
 PYTHON_CANDIDATES=()
 if [[ -n "${MLE_AGENT_PYTHON:-}" ]]; then
   PYTHON_CANDIDATES+=("${MLE_AGENT_PYTHON}")
