@@ -1,0 +1,35 @@
+# Wendao settings for this course. Paths are relative to this folder.
+# Full reference: https://github.com/deng-group/Nexus#settings
+
+[course]
+name = "{name}"
+code = ""                     # e.g. "CS1010"
+website = ""                  # published course site, so answers can link to the right page
+# term = "AY2025/2026 Semester 2"   # otherwise read from a "- Year: ..." line in syllabus.md
+
+[source]
+path = "{source}"             # folder with your Markdown pages and Jupyter notebooks
+exclude = []                  # files to skip, relative to the source folder
+ignore_dirs = []              # extra folders to skip (_build, .git, ... are always skipped)
+
+# Optional: name and order the chapters (one per top-level folder in your notes).
+# show = "primary" (default), "secondary" (e.g. revision), or "hidden".
+# [[chapters]]
+# folder = "week01"
+# name = "Introduction"
+# description = "What the course covers and how to set up."
+
+[search]
+# Spelling variants students might type, and what they should mean.
+aliases = {}                  # e.g. { "convexhull" = "convex hull" }
+
+[graph]
+# Very common concepts that shouldn't link chapters on their own (e.g. "python").
+bridge_stop_concepts = []
+
+[model]
+# Which language model answers questions. Put API keys in .env, not here.
+# provider = "openai"         # "anthropic", "openai" (any OpenAI-compatible server), or "gemini"
+# model = "gpt-4.1-mini"
+# base_url = "https://api.openai.com/v1"   # for anthropic/openai; e.g. http://localhost:11434/v1 for Ollama
+# temperature = 0.2           # use "none" for models that don't accept one

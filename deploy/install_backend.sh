@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
+# Install Wendao on the server and check that it can search the course workspace.
 set -euo pipefail
 
-APP_DIR="${APP_DIR:-/srv/mle-course-helper/backend}"
+APP_DIR="${APP_DIR:-/srv/mle-course-helper/wendao}"
+WORKSPACE="${WORKSPACE:-/srv/mle-course-helper/workspace}"
 VENV_DIR="${VENV_DIR:-$APP_DIR/.venv}"
 
 cd "$APP_DIR"
@@ -12,9 +14,9 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 
 # Install the exact versions pinned in uv.lock, plus gunicorn for the systemd service.
-UV_PROJECT_ENVIRONMENT="$VENV_DIR" uv sync --frozen --extra deploy
+UV_PROJECT_ENVIRONMENT="$VENV_DIR" uv sync --frozen --no-dev --extra deploy
 
-"$VENV_DIR/bin/python" backend/scripts/query.py "What is convex hull?"
+"$VENV_DIR/bin/wendao" ask --workspace "$WORKSPACE" --search-only "What is convex hull?"
 
-echo "Backend virtualenv is ready at $VENV_DIR"
+echo "Wendao is installed in $VENV_DIR"
 echo "Next: copy deploy/env.example to /etc/mle-course-helper.env and install the systemd service."

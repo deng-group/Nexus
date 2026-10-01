@@ -1,0 +1,391 @@
+"""The `wendao` command. Run `wendao --help` to see everything it can do."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+import threading
+import time
+import webbrowser
+from functools import partial
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+from wendao import __version__
+from wendao import workspace as workspace_module
+from wendao.workspace import CONFIG_NAME, Workspace, WorkspaceError
+
+STARTER_DIR = Path(__file__).resolve().parent / "starter"
+
+
+def say(message: str = "") -> None:
+    print(message, flush=True)
+
+
+def load_workspace(args: argparse.Namespace) -> Workspace:
+    workspace = workspace_module.load(args.workspace)
+    workspace.apply_model_settings()
+    return workspace
+
+
+def relative(workspace: Workspace, path: Path) -> str:
+    try:
+        return str(path.relative_to(workspace.root))
+    except ValueError:
+        return str(path)
+
+
+# init -----------------------------------------------------------------------------------------
+
+
+def cmd_init(args: argparse.Namespace) -> None:
+    root = Path(args.folder).expanduser().resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    if args.source:
+        source = Path(args.source).expanduser().resolve()
+        try:
+            source_setting = source.relative_to(root).as_posix()
+        except ValueError:
+            source_setting = Path(_relpath(source, root)).as_posix()
+    else:
+        source_setting = "notes"
+        (root / "notes").mkdir(exist_ok=True)
+
+    files = {
+        CONFIG_NAME: (STARTER_DIR / "wendao.toml").read_text(encoding="utf-8")
+        .replace("{name}", root.name.replace("_", " ").replace("-", " ").title())
+        .replace("{source}", source_setting),
+        "concepts.json": (STARTER_DIR / "concepts.json").read_text(encoding="utf-8"),
+        "questions.json": (STARTER_DIR / "questions.json").read_text(encoding="utf-8"),
+        ".env": (STARTER_DIR / "env.example").read_text(encoding="utf-8"),
+        ".gitignore": (STARTER_DIR / "gitignore").read_text(encoding="utf-8"),
+    }
+    for name, content in files.items():
+        path = root / name
+        if path.exists():
+            say(f"  kept     {name} (already exists)")
+            continue
+        path.write_text(content, encoding="utf-8")
+        say(f"  created  {name}")
+
+    say()
+    say(f"Workspace ready: {root}")
+    say("Next steps:")
+    step = 1
+    if root != Path.cwd():
+        say(f"  {step}. cd {_relpath(root, Path.cwd())}")
+        step += 1
+    if not args.source:
+        say(f"  {step}. Put your lecture notes (Markdown pages, Jupyter notebooks) in notes/")
+        step += 1
+    say(f"  {step}. Edit wendao.toml (course name, website) and concepts.json (concepts for the graph)")
+    say(f"  {step + 1}. Add your API key to .env, then run: wendao build")
+
+
+def _relpath(path: Path, start: Path) -> str:
+    import os
+
+    return os.path.relpath(path, start)
+
+
+# build steps ----------------------------------------------------------------------------------
+
+
+def step_extract(workspace: Workspace) -> None:
+    from wendao.ingest import extract
+
+    say(f"Extracting notes from {relative(workspace, workspace.require_source())} ...")
+    summary = extract(workspace)
+    term = f" Term: {summary['term']}." if summary["term"] else ""
+    say(f"  {summary['files']} files → {summary['chunks']} chunks in {relative(workspace, workspace.chunks_path)}.{term}")
+
+
+def step_graph(workspace: Workspace) -> None:
+    from wendao.graph import build
+
+    say("Building the knowledge graph ...")
+    graph = build(workspace)
+    types = graph["stats"]["node_types"]
+    say(
+        f"  {types.get('chapter', 0)} chapters, {types.get('topic', 0)} topics, {types.get('keyword', 0)} concepts, "
+        f"{graph['stats']['edges']} links → {relative(workspace, workspace.graph_path)}"
+    )
+
+
+def step_index(workspace: Workspace, rebuild: bool = True) -> None:
+    from wendao.rag.pipeline import QueryPipeline
+
+    say("Building the search index (the first run downloads the search model) ...")
+    pipeline = QueryPipeline.for_workspace(workspace, rebuild_index=rebuild)
+    backend = pipeline.retriever.embedding.backend
+    say(f"  {len(pipeline.retriever.chunks)} chunks indexed with {backend} → {relative(workspace, workspace.index_dir)}")
+
+
+def cmd_build(args: argparse.Namespace) -> None:
+    workspace = load_workspace(args)
+    started = time.monotonic()
+    step_extract(workspace)
+    step_graph(workspace)
+    step_index(workspace, rebuild=False)
+    say(f"Done in {time.monotonic() - started:.0f}s. Try: wendao ask \"<a question about your course>\"")
+
+
+def cmd_extract(args: argparse.Namespace) -> None:
+    step_extract(load_workspace(args))
+
+
+def cmd_graph(args: argparse.Namespace) -> None:
+    step_graph(load_workspace(args))
+
+
+def cmd_index(args: argparse.Namespace) -> None:
+    step_index(load_workspace(args), rebuild=True)
+
+
+# ask ------------------------------------------------------------------------------------------
+
+
+def cmd_ask(args: argparse.Namespace) -> None:
+    from wendao.rag.answer import AnswerGenerator
+    from wendao.rag.pipeline import QueryPipeline
+    from wendao.rag.prompts import PromptBuilder
+    from wendao.rag.providers import default_model_name, default_provider_name, provider_from_name
+
+    workspace = load_workspace(args)
+    question = " ".join(args.question)
+    pipeline = QueryPipeline.for_workspace(workspace, top_k=args.top_k)
+
+    if args.search_only:
+        result = pipeline.ask(question)
+        if args.json:
+            say(json.dumps(result, indent=2, ensure_ascii=False))
+            return
+        say(f"Decision: {result['status']} ({result['reason']})")
+        if result["needs_temporal_context"] and result["temporal_context"]:
+            say(f"Term: {result['temporal_context']}")
+        say()
+        for rank, item in enumerate(result["evidence"], start=1):
+            say(f"{rank}. {item['file_path']}  score {item['score']:.2f}  (keyword {item['bm25_score']:.2f}, meaning {item['embedding_score']:.2f})")
+            say(f"   {item['title']}")
+        return
+
+    provider_name = args.provider or default_provider_name()
+    if provider_name == "dry_run" and not args.provider:
+        raise RuntimeError(
+            "No language model is configured, so there is nobody to write the answer.\n"
+            "Add an API key to .env (see `wendao check`), or use --search-only to see what search finds."
+        )
+    model = args.model or default_model_name(provider_name)
+    generator = AnswerGenerator(
+        pipeline=pipeline,
+        prompt_builder=PromptBuilder(course_name=workspace.display_name),
+        provider=provider_from_name(provider_name, model=model),
+        course_name=workspace.display_name,
+    )
+    result = generator.answer(question)
+    if args.json:
+        result.pop("raw_response", None)
+        if not args.show_prompt:
+            result.pop("prompt_package", None)
+        say(json.dumps(result, indent=2, ensure_ascii=False))
+        return
+    if args.show_prompt:
+        say(result["prompt_package"]["final_prompt"])
+        say("\n" + "=" * 72 + "\n")
+    say(result["answer"])
+    if result["sources"]:
+        say("\nSources:")
+        for source in result["sources"]:
+            say(f"  - {source['title']} ({source['file_path']})")
+    model_note = f" / {result['model']}" if result.get("model") else ""
+    say(f"\n[{result['status']} · {result['provider']}{model_note}]")
+
+
+# check ----------------------------------------------------------------------------------------
+
+
+def cmd_check(args: argparse.Namespace) -> None:
+    from wendao.rag.providers import check_connection, default_provider_name
+
+    workspace = load_workspace(args)
+    say(f"Workspace: {workspace.root}")
+    say(f"Course:    {workspace.display_name}")
+    source = workspace.source
+    say(f"Notes:     {source if source else '(not set)'}{'' if source is None or source.is_dir() else '  ← folder not found'}")
+    for label, path in [("Chunks", workspace.chunks_path), ("Graph", workspace.graph_path)]:
+        say(f"{label + ':':<10} {'ok' if path.exists() else 'missing, run `wendao build`'}")
+    try:
+        provider, model = check_connection()
+    except RuntimeError as exc:
+        say("Model:     not working")
+        if default_provider_name() != "dry_run":
+            raise
+        raise RuntimeError(
+            f"{exc}\n\nChoose a model under [model] in wendao.toml and put its API key in .env, for example:\n"
+            '  wendao.toml:  [model]\n               provider = "openai"\n               model = "gpt-4.1-mini"\n'
+            "  .env:        OPENAI_API_KEY=sk-..."
+        ) from None
+    say(f"Model:     ok ({provider} / {model})")
+
+
+# serve ----------------------------------------------------------------------------------------
+
+
+def serve_static_site(folder: Path, port: int) -> ThreadingHTTPServer:
+    handler = partial(SimpleHTTPRequestHandler, directory=str(folder))
+    server = ThreadingHTTPServer(("127.0.0.1", port), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
+def cmd_serve(args: argparse.Namespace) -> None:
+    workspace = load_workspace(args)
+    if not args.no_check:
+        from wendao.rag.providers import check_connection
+
+        try:
+            provider, model = check_connection()
+            say(f"Model: {provider} / {model}")
+        except RuntimeError as exc:
+            raise RuntimeError(f"{exc}\nRun `wendao check` for help, or start anyway with --no-check.") from None
+
+    if args.widget:
+        from wendao.web.widget import create_app
+
+        port = args.port or 5055
+    else:
+        from wendao.web.explorer import create_app
+
+        port = args.port or 5057
+    app = create_app(workspace)
+
+    url = f"http://127.0.0.1:{port}/"
+    if args.site:
+        site = Path(args.site).expanduser().resolve()
+        if not site.is_dir():
+            raise WorkspaceError(f"Site folder not found: {site}")
+        serve_static_site(site, args.site_port)
+        url = f"http://127.0.0.1:{args.site_port}/"
+        say(f"Course site: {url} (serving {site})")
+    say(f"{'Widget API' if args.widget else 'Wendao'}: http://127.0.0.1:{port}/   Press Ctrl+C to stop.")
+    if not args.no_browser:
+        threading.Timer(1.0, webbrowser.open, args=(url,)).start()
+    app.run(host=args.host, port=port, debug=False, threaded=True)
+
+
+# eval -----------------------------------------------------------------------------------------
+
+
+def cmd_eval(args: argparse.Namespace) -> None:
+    from wendao import evaluate
+    from wendao.rag.pipeline import QueryPipeline
+
+    workspace = load_workspace(args)
+    questions = evaluate.load_questions(workspace)
+    if args.only:
+        questions = [case for case in questions if case["id"] in set(args.only)]
+        if not questions:
+            raise ValueError(f"No questions with id: {', '.join(args.only)}")
+    pipeline = QueryPipeline.for_workspace(workspace)
+
+    if args.real:
+        say(f"Asking the model {len(questions)} questions ...")
+        items, report = evaluate.run_real(workspace, pipeline, questions)
+        ok = sum(item["ok"] for item in items)
+        say(f"{ok}/{len(items)} answered. Read them in {relative(workspace, report)}")
+        for item in items:
+            if not item["ok"]:
+                say(f"  FAILED {item['case']['id']}: {item['error']}")
+        if ok < len(items):
+            raise SystemExit(1)
+        return
+
+    runner = evaluate.run_answers if args.answers else evaluate.run_search
+    evaluations, report = runner(workspace, pipeline, questions)
+    passed = sum(item["passed"] for item in evaluations)
+    say(f"{passed}/{len(evaluations)} passed. Report: {relative(workspace, report)}")
+    for item in evaluations:
+        if not item["passed"]:
+            failed = [name for name, ok in item["checks"].items() if not ok]
+            say(f"  FAILED {item['id']}: {', '.join(failed)}")
+    if passed < len(evaluations):
+        raise SystemExit(1)
+
+
+# parser ---------------------------------------------------------------------------------------
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="wendao",
+        description="Turn course notes into a knowledge graph and an AI learning agent.",
+        epilog="Run a command with --help for its options, e.g. `wendao ask --help`.",
+    )
+    parser.add_argument("--version", action="version", version=f"wendao {__version__}")
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument(
+        "-w", "--workspace", type=Path, default=None,
+        help=f"course workspace folder (default: the folder with {CONFIG_NAME} that contains the current folder)",
+    )
+    commands = parser.add_subparsers(dest="command", metavar="<command>")
+
+    init = commands.add_parser("init", help="create a new course workspace")
+    init.add_argument("folder", nargs="?", default=".", help="where to create it (default: current folder)")
+    init.add_argument("--source", help="folder with your existing notes (default: a new notes/ folder)")
+    init.set_defaults(func=cmd_init)
+
+    build = commands.add_parser("build", parents=[common], help="extract notes, build the graph and the search index")
+    build.set_defaults(func=cmd_build)
+    commands.add_parser("extract", parents=[common], help="only extract notes into chunks").set_defaults(func=cmd_extract)
+    commands.add_parser("graph", parents=[common], help="only rebuild the knowledge graph").set_defaults(func=cmd_graph)
+    commands.add_parser("index", parents=[common], help="only rebuild the search index").set_defaults(func=cmd_index)
+
+    ask = commands.add_parser("ask", parents=[common], help="ask a question about the course")
+    ask.add_argument("question", nargs="+")
+    ask.add_argument("--search-only", action="store_true", help="show what search finds, without calling a model")
+    ask.add_argument("--provider", choices=["anthropic", "openai", "gemini", "dry_run"], help="override the configured provider")
+    ask.add_argument("--model", help="override the configured model")
+    ask.add_argument("--show-prompt", action="store_true", help="also print the prompt sent to the model")
+    ask.add_argument("--json", action="store_true", help="print the full result as JSON")
+    ask.add_argument("--top-k", type=int, default=5, help="how many chunks to retrieve (default: 5)")
+    ask.set_defaults(func=cmd_ask)
+
+    commands.add_parser("check", parents=[common], help="check the workspace and the model connection").set_defaults(func=cmd_check)
+
+    serve = commands.add_parser("serve", parents=[common], help="start the knowledge graph website")
+    serve.add_argument("--widget", action="store_true", help="start the course-website widget API instead")
+    serve.add_argument("--port", type=int, help="port (default: 5057, or 5055 with --widget)")
+    serve.add_argument("--host", default="127.0.0.1", help="address to listen on (default: 127.0.0.1)")
+    serve.add_argument("--site", help="also serve a built course website from this folder, to test the widget")
+    serve.add_argument("--site-port", type=int, default=8000, help="port for --site (default: 8000)")
+    serve.add_argument("--no-browser", action="store_true", help="don't open a browser")
+    serve.add_argument("--no-check", action="store_true", help="start without checking the model connection")
+    serve.set_defaults(func=cmd_serve)
+
+    evaluation = commands.add_parser("eval", parents=[common], help="test Wendao with the questions in questions.json")
+    level = evaluation.add_mutually_exclusive_group()
+    level.add_argument("--answers", action="store_true", help="check prompts and citations (dry run, no model)")
+    level.add_argument("--real", action="store_true", help="ask the real model every question (uses API credits)")
+    evaluation.add_argument("--only", nargs="+", metavar="ID", help="only run these question ids")
+    evaluation.set_defaults(func=cmd_eval)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if not getattr(args, "func", None):
+        parser.print_help()
+        return
+    try:
+        args.func(args)
+    except (WorkspaceError, RuntimeError, ValueError, FileNotFoundError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        raise SystemExit(1) from None
+    except KeyboardInterrupt:
+        raise SystemExit(130) from None
+
+
+if __name__ == "__main__":
+    main()
