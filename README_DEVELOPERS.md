@@ -66,8 +66,9 @@ terms such as "this", "that", "it", or "they", retrieval also prepends up to the
 last 4 memory items, truncated to 400 characters each, to make the search query
 less ambiguous.
 
-The LLM provider is configured through environment variables, loaded from
-`scripts/api_env.sh` or `.env` (both ignored by git). Three providers are
+The LLM provider is chosen under `[model]` in the workspace's `wendao.toml`, with
+the API key in the workspace's `.env` (ignored by git). Real environment
+variables override both. Three providers are
 supported: `anthropic` (Anthropic Messages API: `ANTHROPIC_BASE_URL`,
 `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`), `openai` (any OpenAI-compatible Chat
 Completions API: `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_MODEL`), and
@@ -99,31 +100,27 @@ buffered `/api/answer` route remains available for scripts and evaluations.
 The book repo should not store API keys, retrieval code, prompts, provider logic,
 or chunk data. This repo should not edit course source content unless explicitly
 requested. When the book content changes, rerun extraction and evaluation from
-this repo using the sibling path `../MLE4217_5219_book`.
+the example workspace (`cd examples/mle4217_5219 && wendao build && wendao eval`),
+which reads the sibling path `../MLE4217_5219_book`.
 
 Syllabus/calendar answers are time-aware by design. Logistics answers must state
 the applicable academic year and semester; current extracted logistics content is
 marked as **AY2025/2026 Semester 2**.
 
-## Local API and Course-Widget Tools
+## Testing the Course-Website Widget Locally
 
-Create the ignored local API settings file from the safe template, edit its
-three exports, then load it into the current shell:
-
-```bash
-cp scripts/api_env.example.sh scripts/api_env.sh
-source scripts/api_env.sh
-```
-
-Start the backend and open the widget inside the existing sibling course site:
+Build the book and copy the current widget into it from the book repository
+(`make web`, then `python ai_agent_widget/inject_ai_agent_widget.py`). Then start
+the widget API and serve the built site together:
 
 ```bash
-python scripts/start_course_widget_test.py
+cd examples/mle4217_5219
+wendao serve --widget --site ../../../MLE4217_5219_book/_build/html
 ```
 
-Pass `--build` when course source content changed; otherwise the tool only
-refreshes the widget assets in the existing build. Stop both local services with
-`Ctrl+C`.
+This checks the model, starts the API at `http://127.0.0.1:5055`, serves the
+site at `http://127.0.0.1:8000`, and opens it. Use the `?` button at the
+bottom-right. Stop both with `Ctrl+C`.
 
 ## TODO
 

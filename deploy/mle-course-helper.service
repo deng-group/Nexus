@@ -1,14 +1,16 @@
 [Unit]
-Description=MLE4217/5219 Course Helper API
+Description=Wendao course AI widget API (MLE4217/5219)
 After=network.target
 
 [Service]
 Type=simple
 User=mlehelper
 Group=mlehelper
-WorkingDirectory=/srv/mle-course-helper/backend
+# The course workspace (wendao.toml, concepts.json, build/). API keys come from the EnvironmentFile.
+WorkingDirectory=/srv/mle-course-helper/workspace
+Environment=WENDAO_WORKSPACE=/srv/mle-course-helper/workspace
 EnvironmentFile=/etc/mle-course-helper.env
-ExecStart=/srv/mle-course-helper/backend/.venv/bin/gunicorn web_app.app:app --bind 127.0.0.1:5055 --workers 2 --threads 4 --timeout 180 --access-logfile -
+ExecStart=/srv/mle-course-helper/wendao/.venv/bin/gunicorn "wendao.web.widget:create_app()" --bind 127.0.0.1:5055 --workers 2 --threads 4 --timeout 180 --access-logfile -
 Restart=always
 RestartSec=5
 

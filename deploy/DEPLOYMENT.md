@@ -1,167 +1,130 @@
 # Server Deployment
 
-This deploys the course book and the RAG API on one Linux server:
+This puts the course website and the Wendao widget API on one Linux server:
 
 ```text
-https://YOUR_DOMAIN/            -> static book site
-https://YOUR_DOMAIN/api/answer  -> Flask/Gunicorn RAG API
-https://YOUR_DOMAIN/api/answer/stream -> streaming route used by the course widget
+https://YOUR_DOMAIN/                  -> static course website
+https://YOUR_DOMAIN/api/answer        -> Wendao widget API (Flask + Gunicorn)
+https://YOUR_DOMAIN/api/answer/stream -> streaming answers, used by the course widget
 ```
 
-The book widget keeps local testing on `http://127.0.0.1:5055`, but on a real
-domain it automatically calls the same origin, so Nginx can route `/api/*` to the
-backend.
+The server keeps three folders:
 
-## 1. Server Packages
+```text
+/srv/mle-course-helper/wendao/       the Wendao tool (this repository)
+/srv/mle-course-helper/workspace/    the course workspace: wendao.toml, concepts.json, build/
+/srv/mle-course-helper/book/         the built course website
+```
+
+The widget uses `http://127.0.0.1:5055` when you test locally. On a real domain it calls the same
+address as the page, so Nginx sends `/api/*` to Wendao.
+
+## 1. Server packages
 
 Ubuntu example:
 
 ```bash
 sudo apt update
-sudo apt install -y git rsync nginx python3
-curl -LsSf https://astral.sh/uv/install.sh | sh   # uv installs the locked Python environment
+sudo apt install -y git rsync nginx python3 curl
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-Create directories:
+Create the folders and a service user:
 
 ```bash
 sudo useradd --system --home /srv/mle-course-helper --shell /usr/sbin/nologin mlehelper || true
-sudo mkdir -p /srv/mle-course-helper/backend /srv/mle-course-helper/book
+sudo mkdir -p /srv/mle-course-helper/{wendao,workspace,book}
 sudo chown -R "$USER":"$USER" /srv/mle-course-helper
 ```
 
-## 2. Upload Repositories
+## 2. Upload Wendao, the workspace, and the website
 
-On your laptop, upload the backend repo:
-
-```bash
-rsync -az --delete \
-  --exclude .git --exclude .env --exclude .venv --exclude __pycache__ \
-  /path/to/mle4217_5219_AIdesk/ \
-  USER@SERVER:/srv/mle-course-helper/backend/
-```
-
-Build the book locally or on the server:
+Build the workspace on your laptop first (`wendao build`), so the server doesn't need the lecture notes.
+Then, from this repository:
 
 ```bash
-cd /path/to/MLE4217_5219_book
-make web
+bash deploy/sync_to_server.sh USER@SERVER /path/to/MLE4217_5219_book [/path/to/workspace]
 ```
 
-Then upload the generated static site:
+This builds the book, then uploads Wendao, the workspace (default: `examples/mle4217_5219`), and the
+built website. It never uploads `.env` files.
 
-```bash
-rsync -az --delete \
-  /path/to/MLE4217_5219_book/_build/html/ \
-  USER@SERVER:/srv/mle-course-helper/book/
-```
-
-## 3. Install Backend Python Environment
+## 3. Install Wendao
 
 On the server:
 
 ```bash
-cd /srv/mle-course-helper/backend
+cd /srv/mle-course-helper/wendao
 bash deploy/install_backend.sh
-mkdir -p /srv/mle-course-helper/backend/.cache/huggingface
-sudo chown -R mlehelper:mlehelper /srv/mle-course-helper/backend/.cache
+mkdir -p /srv/mle-course-helper/wendao/.cache/huggingface
+sudo chown -R mlehelper:mlehelper /srv/mle-course-helper/wendao/.cache
 ```
 
-The first run may take a while because `sentence-transformers` installs model
-dependencies.
+The script installs the locked dependencies and runs one test search. The first run takes a while
+because it downloads the search model.
 
-## 4. Configure Secrets
-
-On the server:
+## 4. Add the API key
 
 ```bash
-sudo cp /srv/mle-course-helper/backend/deploy/env.example /etc/mle-course-helper.env
+sudo cp /srv/mle-course-helper/wendao/deploy/env.example /etc/mle-course-helper.env
 sudo nano /etc/mle-course-helper.env
 sudo chmod 600 /etc/mle-course-helper.env
 ```
 
-Fill in one provider. For example, for the Anthropic-compatible relay:
+The model itself is chosen under `[model]` in the workspace's `wendao.toml`. Put only the key in this
+file, for example `ANTHROPIC_AUTH_TOKEN=...`. Anything you set here overrides `wendao.toml`.
+
+## 5. Start the service
 
 ```bash
-ANTHROPIC_BASE_URL=https://your-relay.example.com
-ANTHROPIC_AUTH_TOKEN=replace-me
-ANTHROPIC_MODEL=claude-sonnet-4-6
-```
-
-If you leave all keys unset, the API runs in `dry_run` mode.
-
-## 5. Install systemd Service
-
-```bash
-sudo cp /srv/mle-course-helper/backend/deploy/mle-course-helper.service /etc/systemd/system/
+sudo cp /srv/mle-course-helper/wendao/deploy/mle-course-helper.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now mle-course-helper
 sudo systemctl status mle-course-helper --no-pager
 ```
 
-Check the local API:
+Check it:
 
 ```bash
 curl http://127.0.0.1:5055/api/health
-curl -X POST http://127.0.0.1:5055/api/answer \
-  -H 'Content-Type: application/json' \
-  -d '{"query":"What is MACE?"}'
+curl -X POST http://127.0.0.1:5055/api/answer -H 'Content-Type: application/json' -d '{"query":"What is MACE?"}'
+sudo journalctl -u mle-course-helper -f     # logs
 ```
 
-Logs:
+## 6. Nginx
+
+Edit the domain in the config, then enable it:
 
 ```bash
-sudo journalctl -u mle-course-helper -f
-```
-
-## 6. Install Nginx Site
-
-Edit the domain in the config:
-
-```bash
-sudo cp /srv/mle-course-helper/backend/deploy/nginx-mle-course-helper.conf /etc/nginx/sites-available/mle-course-helper
+sudo cp /srv/mle-course-helper/wendao/deploy/nginx-mle-course-helper.conf /etc/nginx/sites-available/mle-course-helper
 sudo nano /etc/nginx/sites-available/mle-course-helper
 sudo ln -sf /etc/nginx/sites-available/mle-course-helper /etc/nginx/sites-enabled/mle-course-helper
 sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-Open:
-
-```text
-http://YOUR_DOMAIN/
-```
-
-Then test the widget in the bottom-right corner.
+Open `http://YOUR_DOMAIN/` and try the widget in the bottom-right corner.
 
 ## 7. HTTPS
 
-If the server is public and the domain DNS points to it, use Certbot:
+If the server is public and the domain points to it:
 
 ```bash
 sudo apt install -y certbot python3-certbot-nginx
 sudo certbot --nginx -d YOUR_DOMAIN
 ```
 
-## 8. Updating Later
+## 8. Updating later
 
-Backend update:
-
-```bash
-rsync -az --delete --exclude .git --exclude .env --exclude __pycache__ \
-  /path/to/mle4217_5219_AIdesk/ USER@SERVER:/srv/mle-course-helper/backend/
-ssh USER@SERVER 'cd /srv/mle-course-helper/backend && bash deploy/install_backend.sh && sudo systemctl restart mle-course-helper'
-```
-
-Book update:
+After changing Wendao, the notes, or the workspace, rebuild locally (`wendao build`) and run the same
+upload, then restart:
 
 ```bash
-cd /path/to/MLE4217_5219_book
-make web
-rsync -az --delete _build/html/ USER@SERVER:/srv/mle-course-helper/book/
+bash deploy/sync_to_server.sh USER@SERVER /path/to/MLE4217_5219_book [/path/to/workspace]
+ssh USER@SERVER 'cd /srv/mle-course-helper/wendao && bash deploy/install_backend.sh && sudo systemctl restart mle-course-helper'
 ```
 
-## Important
+## Keys
 
-Do not upload local `.env` files or API keys to git. If a key was ever committed
-or copied into a shell script, rotate it before deployment.
+Never commit `.env` files or API keys. If a key was ever committed or pasted into a script, replace it
+with a new one before you deploy.
