@@ -1,3 +1,7 @@
+> [!IMPORTANT]
+> **This project has moved to [deng-group/wendao](https://github.com/deng-group/wendao)** and is now called **Wendao**.
+> Install it with `pip install wendao`. This repository is archived and no longer updated.
+
 <p align="center">
   <a href="https://github.com/deng-group/Nexus"><img src="docs/assets/logo/wendao_logo.svg" width="520" alt="Wendao: ask the way. An AI learning companion."></a>
 </p>
